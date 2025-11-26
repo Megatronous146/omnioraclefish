@@ -1,21 +1,23 @@
-// This file assumes fps.ms uses a standard Node/Express environment.
-const express = require('express');
-const { getPlayerScores } = require('./get_scores'); // Import the main script
+// api/scores.js
 
-const app = express();
-const port = process.env.PORT || 3000;
+// Relative path to the core logic file
+const { getPlayerScores } = require('../get_scores'); 
 
-app.get('/api/scores', async (req, res) => {
+// Vercel function handler
+module.exports = async (req, res) => {
+    // Standard Vercel deployment has a 60-second timeout on the free tier.
+    // Ensure the scraping logic completes within this time.
+    
+    console.log('Vercel function triggered.');
+
     try {
         const scores = await getPlayerScores();
-        // Send the processed string back to the Discord bot
+        
+        // Success: Send the processed string back to BotGhost
         res.status(200).send(scores);
-    } catch (error) {
-        console.error('API Error:', error);
-        res.status(500).send('Internal Server Error while fetching scores.');
-    }
-});
 
-app.listen(port, () => {
-    console.log(`API listening at http://localhost:${port}`);
-});
+    } catch (error) {
+        // Send a clean 500 status on failure
+        res.status(500).send(`Scraping Failed: ${error.message}`);
+    }
+};
