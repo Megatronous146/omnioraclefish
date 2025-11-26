@@ -5,8 +5,9 @@
   "scripts": {
     "start": "node api/scores.js"
   },
-  "dependencies": {
-    "puppeteer-core": "22.6.0",
-    "@sparticuz/chromium": "123.0.1"
-  }
+"dependencies": {
+    "@sparticuz/chromium": "^141.0.0", 
+    "puppeteer-core": "^24.23.1"
 }
+}
+
