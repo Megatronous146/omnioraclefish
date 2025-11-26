@@ -1,5 +1,7 @@
-// get_scores.js
-const chromium = require('@sparticuz/chromium');
+// get_scores.js - Core Scraping Logic for Vercel (Updated for Node 22/24)
+
+// Vercel Compatibility Fix: Use the modern package
+const chromium = require('@sparticuz/chromium'); 
 const puppeteer = require('puppeteer-core');
 
 // --- Configuration ---
@@ -10,6 +12,9 @@ const TARGET_SERVER_LOCATIONS = [
     'Silicon Valley', 'Dallas', 'Toronto' 
 ];
 
+/**
+ * Parses the raw score string (e.g., "130,534") into a numeric integer.
+ */
 function parseScore(scoreStr) {
     return parseInt(scoreStr.replace(/,/g, ''), 10);
 }
@@ -19,14 +24,11 @@ async function getPlayerScores() {
     const combinedLeaderboard = new Map(); 
 
     try {
-        // Essential setting for Vercel to prevent crashes
-        chromium.setGraphicsMode = false;
-
         // Launch browser using the modern @sparticuz/chromium setup
         browser = await puppeteer.launch({
             args: chromium.args,
             defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath(), // This is now a function call
+            executablePath: await chromium.executablePath(), // Vercel Fix: MUST be a function call ()
             headless: chromium.headless,
             ignoreHTTPSErrors: true,
         });
@@ -44,14 +46,12 @@ async function getPlayerScores() {
         for (const location of TARGET_SERVER_LOCATIONS) {
             
             // A. Open the server modal
-            // We use safe selectors (await page.$) to prevent crashing if a button is missing
             const serverBtn = await page.$('.btn-pink.w-100.funny-rounded');
             if (serverBtn) await serverBtn.click();
             
             try {
                 await page.waitForSelector('.modal-body .server-data-container', { visible: true, timeout: 3000 });
             } catch (e) {
-                // If modal fails to open, try to close it and skip to next
                 const closeBtn = await page.$('button[aria-label="Close"]');
                 if (closeBtn) await closeBtn.click();
                 continue; 
@@ -87,11 +87,19 @@ async function getPlayerScores() {
             if (playBtn) await playBtn.click();
             
             try {
+                // Wait for the "Start Game" button to appear
                 await page.waitForSelector('button.btn-primary', { timeout: 5000 });
-                await page.click('button.btn-primary'); // Start Game
                 
-                await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 5000 });
+                // *** CRITICAL FIX: Wait for the click AND the navigation to complete ***
+                // This resolves the 'Navigating frame was detached' error.
+                await Promise.all([
+                    // Wait for a full navigation to the game screen (increased timeout for Vercel)
+                    page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 }), 
+                    // Click the 'Start Game' button to initiate the navigation
+                    page.click('button.btn-primary'), 
+                ]);
                 
+                // Click "Start Now" button to skip ads/tutorials
                 const startNowBtn = await page.$('.btn-pink.mr-3.btn-lg');
                 if (startNowBtn) await startNowBtn.click();
                 
@@ -99,6 +107,7 @@ async function getPlayerScores() {
                 await new Promise(resolve => setTimeout(resolve, 1500)); 
             } catch (e) {
                 // If game start fails, reload page and skip to next server
+                console.error(`Game start failed for ${location}: ${e.message}`);
                 await page.goto(BASE_URL, { waitUntil: 'networkidle0' });
                 continue;
             }
