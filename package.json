@@ -1,13 +1,12 @@
 {
   "name": "omnioraclefish-api",
   "version": "1.0.0",
-  "description": "Vercel Serverless API for Stabfish 2 leaderboard scraping using Puppeteer.",
+  "description": "Vercel Serverless API using @sparticuz/chromium",
   "scripts": {
     "start": "node api/scores.js"
   },
   "dependencies": {
-    "chrome-aws-lambda": "^6.0.0", 
-    "puppeteer-core": "^6.0.0" 
+    "puppeteer-core": "22.6.0",
+    "@sparticuz/chromium": "123.0.1"
   }
-
 }
