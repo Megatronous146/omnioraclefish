@@ -1,23 +1,24 @@
-// api/scores.js
+// api/apiscores.js - Vercel Serverless Function Handler
 
-// Relative path to the core logic file
+// Note the relative path to the core logic file
 const { getPlayerScores } = require('../get_scores'); 
 
 // Vercel function handler
 module.exports = async (req, res) => {
-    // Standard Vercel deployment has a 60-second timeout on the free tier.
-    // Ensure the scraping logic completes within this time.
+    // This sets the response header to avoid unexpected JSON parsing issues on the client (BotGhost)
+    res.setHeader('Content-Type', 'text/plain');
     
-    console.log('Vercel function triggered.');
+    console.log('Vercel function triggered for /api/apiscores.');
 
     try {
         const scores = await getPlayerScores();
         
-        // Success: Send the processed string back to BotGhost
+        // Success: Send the raw text string back to BotGhost
+        // This should ensure fetch.response contains the pure string data.
         res.status(200).send(scores);
 
     } catch (error) {
-        // Send a clean 500 status on failure
+        // Send a detailed error message and status on failure
         res.status(500).send(`Scraping Failed: ${error.message}`);
     }
 };
