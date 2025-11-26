@@ -1,4 +1,6 @@
 // Stability-Optimized Scraper for Vercel — Option B (Most Reliable)
+// Updated: replace page.waitForTimeout(...) with a safe sleep(...) helper
+// to avoid "page.waitForTimeout is not a function" in some puppeteer-core builds.
 
 // Chromium for serverless
 const chromium = require('@sparticuz/chromium');
@@ -14,6 +16,11 @@ function parseScore(scoreStr) {
     return parseInt(scoreStr.replace(/,/g, ''), 10);
 }
 
+// Simple sleep helper (works everywhere)
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // ---------- SAFE NAVIGATION (Fix for frame detachment) ----------
 async function safeGoto(page, url) {
     for (let i = 1; i <= 4; i++) {
@@ -26,7 +33,7 @@ async function safeGoto(page, url) {
             });
 
             // buffer — stabfish reloads the frame after DOM load
-            await page.waitForTimeout(500);
+            await sleep(500);
 
             return; // success
         } catch (err) {
@@ -37,7 +44,7 @@ async function safeGoto(page, url) {
                 err.message.includes("LifecycleWatcher")
             ) {
                 // retry
-                await page.waitForTimeout(400);
+                await sleep(400);
                 continue;
             }
 
@@ -51,7 +58,7 @@ async function safeClick(page, selector) {
     try {
         await page.waitForSelector(selector, { timeout: 5000 });
         await page.click(selector);
-        await page.waitForTimeout(250);
+        await sleep(250);
         return true;
     } catch (err) {
         console.error(`safeClick failed (${selector}):`, err.message);
@@ -94,7 +101,7 @@ async function getPlayerScores() {
 
             // Open server selector
             await safeClick(page, ".btn-pink.w-100.funny-rounded");
-            await page.waitForTimeout(300);
+            await sleep(300);
 
             // Look for the server in the modal
             const fullServerName = await page.evaluate((loc) => {
@@ -120,7 +127,7 @@ async function getPlayerScores() {
                 if (target) target.click();
             }, fullServerName);
 
-            await page.waitForTimeout(300);
+            await sleep(300);
 
             // Close modal
             await safeClick(page, 'button[aria-label="Close"]');
@@ -130,7 +137,7 @@ async function getPlayerScores() {
             await safeClick(page, "button.btn-primary");        // Start Game
             await safeClick(page, ".btn-pink.mr-3.btn-lg");     // Start Now
 
-            await page.waitForTimeout(1200); // buffer for game UI to spawn
+            await sleep(1200); // buffer for game UI to spawn
 
             // ----- Leaderboard -----
             await safeClick(page, ".bar-button .fa-trophy");
@@ -169,6 +176,11 @@ async function getPlayerScores() {
             // Return to home page safely
             await safeGoto(page, BASE_URL);
             await page.waitForSelector("#playername", { timeout: 6000 });
+            // clear & retype the name to be safe
+            await page.evaluate(() => {
+                const el = document.querySelector('#playername');
+                if (el) el.value = '';
+            });
             await page.type("#playername", PLAYER_NAME_TO_EXCLUDE, { delay: 1 });
         }
 
