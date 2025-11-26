@@ -1,24 +1,16 @@
-// api/apiscores.js - Vercel Serverless Function Handler
-
-// Note the relative path to the core logic file
+// api/scores.js
 const { getPlayerScores } = require('../get_scores'); 
 
-// Vercel function handler
 module.exports = async (req, res) => {
-    // This sets the response header to avoid unexpected JSON parsing issues on the client (BotGhost)
+    // Force text/plain so BotGhost doesn't try to parse it as JSON
     res.setHeader('Content-Type', 'text/plain');
-    
-    console.log('Vercel function triggered for /api/apiscores.');
+    console.log('Function triggered: Using @sparticuz/chromium');
 
     try {
         const scores = await getPlayerScores();
-        
-        // Success: Send the raw text string back to BotGhost
-        // This should ensure fetch.response contains the pure string data.
         res.status(200).send(scores);
-
     } catch (error) {
-        // Send a detailed error message and status on failure
-        res.status(500).send(`Scraping Failed: ${error.message}`);
+        console.error('Handler Error:', error);
+        res.status(500).send(`Failed: ${error.message}`);
     }
 };
