@@ -1,172 +1,189 @@
-// get_scores.js - Core Scraping Logic for Vercel (Updated for Node 22/24)
+// Stability-Optimized Scraper for Vercel — Option B (Most Reliable)
 
-// Vercel Compatibility Fix: Use the modern package
-const chromium = require('@sparticuz/chromium'); 
+// Chromium for serverless
+const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 
-// --- Configuration ---
-const BASE_URL = 'https://stabfish2.io';
-const PLAYER_NAME_TO_EXCLUDE = 'Lost';
-// We limit the server list to the fastest 3 to ensure we don't hit the 60s timeout
-const TARGET_SERVER_LOCATIONS = [
-    'Silicon Valley', 'Dallas', 'Toronto' 
-];
+// Config
+const BASE_URL = "https://stabfish2.io";
+const PLAYER_NAME_TO_EXCLUDE = "Lost";
+const TARGET_SERVER_LOCATIONS = ["Silicon Valley", "Dallas", "Toronto"];
 
-/**
- * Parses the raw score string (e.g., "130,534") into a numeric integer.
- */
+// Helper to convert "123,456" → 123456
 function parseScore(scoreStr) {
     return parseInt(scoreStr.replace(/,/g, ''), 10);
 }
 
-async function getPlayerScores() {
-    let browser;
-    const combinedLeaderboard = new Map(); 
+// ---------- SAFE NAVIGATION (Fix for frame detachment) ----------
+async function safeGoto(page, url) {
+    for (let i = 1; i <= 4; i++) {
+        try {
+            console.log(`safeGoto attempt ${i} →`, url);
 
-    try {
-        // Launch browser using the modern @sparticuz/chromium setup
-        browser = await puppeteer.launch({
-            args: chromium.args,
-            defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath(), // Vercel Fix: MUST be a function call ()
-            headless: chromium.headless,
-            ignoreHTTPSErrors: true,
-        });
-        
-        const page = await browser.newPage();
-        // Set a timeout of 50s to leave buffer room for Vercel's 60s hard limit
-        await page.goto(BASE_URL, { waitUntil: 'networkidle0', timeout: 50000 });
+            await page.goto(url, {
+                waitUntil: "domcontentloaded",
+                timeout: 15000
+            });
 
-        // 1. Enter player name 'Lost'
-        const nameInputSelector = '#playername'; 
-        await page.waitForSelector(nameInputSelector, { timeout: 10000 });
-        await page.type(nameInputSelector, PLAYER_NAME_TO_EXCLUDE);
+            // buffer — stabfish reloads the frame after DOM load
+            await page.waitForTimeout(500);
 
-        // --- Loop through target servers ---
-        for (const location of TARGET_SERVER_LOCATIONS) {
-            
-            // A. Open the server modal
-            const serverBtn = await page.$('.btn-pink.w-100.funny-rounded');
-            if (serverBtn) await serverBtn.click();
-            
-            try {
-                await page.waitForSelector('.modal-body .server-data-container', { visible: true, timeout: 3000 });
-            } catch (e) {
-                const closeBtn = await page.$('button[aria-label="Close"]');
-                if (closeBtn) await closeBtn.click();
-                continue; 
+            return; // success
+        } catch (err) {
+            console.error(`safeGoto attempt ${i} failed: ${err.message}`);
+
+            if (
+                err.message.includes("frame was detached") ||
+                err.message.includes("LifecycleWatcher")
+            ) {
+                // retry
+                await page.waitForTimeout(400);
+                continue;
             }
 
-            // B. Find server
+            if (i === 4) throw err;
+        }
+    }
+}
+
+// ---------- SAFE CLICK ----------
+async function safeClick(page, selector) {
+    try {
+        await page.waitForSelector(selector, { timeout: 5000 });
+        await page.click(selector);
+        await page.waitForTimeout(250);
+        return true;
+    } catch (err) {
+        console.error(`safeClick failed (${selector}):`, err.message);
+        return false;
+    }
+}
+
+// ---------- MAIN SCRAPER ----------
+async function getPlayerScores() {
+    let browser;
+
+    try {
+        browser = await puppeteer.launch({
+            args: [
+                ...chromium.args,
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--single-process"
+            ],
+            defaultViewport: chromium.defaultViewport,
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
+            ignoreHTTPSErrors: true
+        });
+
+        const page = await browser.newPage();
+
+        const leaderboard = new Map();
+
+        // Load initial page safely
+        await safeGoto(page, BASE_URL);
+
+        // Enter name into text field
+        await page.waitForSelector("#playername", { timeout: 8000 });
+        await page.type("#playername", PLAYER_NAME_TO_EXCLUDE);
+
+        // ----- LOOP: For each server -----
+        for (const location of TARGET_SERVER_LOCATIONS) {
+            console.log(`\n=== SERVER: ${location} ===`);
+
+            // Open server selector
+            await safeClick(page, ".btn-pink.w-100.funny-rounded");
+            await page.waitForTimeout(300);
+
+            // Look for the server in the modal
             const fullServerName = await page.evaluate((loc) => {
-                const names = Array.from(document.querySelectorAll('.server-data-container .server-data .name'));
-                const targetElement = names.find(el => el.textContent.trim().startsWith(loc));
-                return targetElement ? targetElement.textContent.trim() : null;
+                const names = [...document.querySelectorAll(".server-data .name")];
+                const match = names.find(n => n.textContent.trim().startsWith(loc));
+                return match ? match.textContent.trim() : null;
             }, location);
 
             if (!fullServerName) {
-                await page.click('button[aria-label="Close"]'); 
+                console.log(`Server not found: ${location}`);
+                await safeClick(page, 'button[aria-label="Close"]');
                 continue;
             }
-            
-            // C. Click server
-            const serverElement = await page.evaluateHandle((name) => {
-                const names = Array.from(document.querySelectorAll('.server-data-container .server-data .name'));
-                const target = names.find(el => el.textContent.trim() === name);
-                return target ? target.closest('.server-data') : null;
+
+            console.log("Found server:", fullServerName);
+
+            // Click server row inside modal
+            await page.evaluate((targetName) => {
+                const items = [...document.querySelectorAll(".server-data")];
+                const target = items.find(i =>
+                    i.querySelector(".name")?.textContent.trim() === targetName
+                );
+                if (target) target.click();
             }, fullServerName);
 
-            if (serverElement) await serverElement.click();
-            
-            // D. Close modal
-            const closeBtn = await page.$('button[aria-label="Close"]');
-            if (closeBtn) await closeBtn.click();
+            await page.waitForTimeout(300);
 
-            // 2. Start flow
-            const playBtn = await page.$('.btn-primary.btn-lg.w-100');
-            if (playBtn) await playBtn.click();
-            
+            // Close modal
+            await safeClick(page, 'button[aria-label="Close"]');
+
+            // ----- Start Game flow -----
+            await safeClick(page, ".btn-primary.btn-lg.w-100"); // Play
+            await safeClick(page, "button.btn-primary");        // Start Game
+            await safeClick(page, ".btn-pink.mr-3.btn-lg");     // Start Now
+
+            await page.waitForTimeout(1200); // buffer for game UI to spawn
+
+            // ----- Leaderboard -----
+            await safeClick(page, ".bar-button .fa-trophy");
+
             try {
-                // Wait for the "Start Game" button to appear
-                await page.waitForSelector('button.btn-primary', { timeout: 5000 });
-                
-                // *** CRITICAL FIX: Wait for the click AND the navigation to complete ***
-                // This resolves the 'Navigating frame was detached' error.
-                await Promise.all([
-                    // Wait for a full navigation to the game screen (increased timeout for Vercel)
-                    page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 }), 
-                    // Click the 'Start Game' button to initiate the navigation
-                    page.click('button.btn-primary'), 
-                ]);
-                
-                // Click "Start Now" button to skip ads/tutorials
-                const startNowBtn = await page.$('.btn-pink.mr-3.btn-lg');
-                if (startNowBtn) await startNowBtn.click();
-                
-                // Short wait for leaderboard data to populate
-                await new Promise(resolve => setTimeout(resolve, 1500)); 
-            } catch (e) {
-                // If game start fails, reload page and skip to next server
-                console.error(`Game start failed for ${location}: ${e.message}`);
-                await page.goto(BASE_URL, { waitUntil: 'networkidle0' });
-                continue;
-            }
+                await page.waitForSelector(".utility-ranks .list", { timeout: 3000 });
 
-            // 3. Open Leaderboard
-            const trophyBtn = await page.$('.bar-button .fa-trophy');
-            if (trophyBtn) {
-                await trophyBtn.click();
-                try {
-                    await page.waitForSelector('.utility-ranks .list', { timeout: 3000 });
-                    
-                    // 4. Extract data
-                    const serverScores = await page.evaluate((excludeName) => {
-                        const scores = [];
-                        const list = document.querySelector('.utility-ranks .list');
-                        if (!list) return scores;
+                const entries = await page.evaluate((excludeName) => {
+                    const out = [];
+                    const rows = document.querySelectorAll(".rank-item");
 
-                        list.querySelectorAll('.rank-item').forEach(item => {
-                            if (item.classList.contains('text-yellow')) return; 
-                            const name = item.querySelector('.name')?.textContent.trim();
-                            const score = item.querySelector('.score')?.textContent.trim();
-                            if (name && score && name !== excludeName) {
-                                scores.push({ name, score });
-                            }
-                        });
-                        return scores;
-                    }, PLAYER_NAME_TO_EXCLUDE);
-                    
-                    // 5. Merge
-                    serverScores.forEach(entry => {
-                        const currentScore = parseScore(entry.score);
-                        const existingScore = combinedLeaderboard.get(entry.name) || 0;
-                        if (currentScore > existingScore) combinedLeaderboard.set(entry.name, currentScore);
+                    rows.forEach(r => {
+                        if (r.classList.contains("text-yellow")) return;
+
+                        const name = r.querySelector(".name")?.textContent?.trim();
+                        const score = r.querySelector(".score")?.textContent?.trim();
+                        if (name && score && name !== excludeName) {
+                            out.push({ name, score });
+                        }
                     });
-                } catch (e) {
-                    console.error(`Leaderboard failed for ${location}: ${e.message}`);
+
+                    return out;
+                }, PLAYER_NAME_TO_EXCLUDE);
+
+                // Merge best scores
+                for (const entry of entries) {
+                    const num = parseScore(entry.score);
+                    const prev = leaderboard.get(entry.name) || 0;
+                    if (num > prev) leaderboard.set(entry.name, num);
                 }
+
+            } catch (e) {
+                console.error(`Leaderboard failed for ${location}: ${e.message}`);
             }
 
-            // 6. Reset for next loop
-            await page.goto(BASE_URL, { waitUntil: 'networkidle0' });
-            try {
-                await page.waitForSelector(nameInputSelector, { timeout: 5000 });
-            } catch (e) {
-                // If we can't get back to home, stop scraping
-                break;
-            }
+            // Return to home page safely
+            await safeGoto(page, BASE_URL);
+            await page.waitForSelector("#playername", { timeout: 6000 });
+            await page.type("#playername", PLAYER_NAME_TO_EXCLUDE, { delay: 1 });
         }
 
-        // 7. Sort and Format
-        const finalRankings = Array.from(combinedLeaderboard.entries())
-            .map(([name, score]) => ({ name, score }))
-            .sort((a, b) => b.score - a.score); 
+        // Convert map → text leaderboard
+        const final = [...leaderboard.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, score]) => `${name}, ${score.toLocaleString()}`)
+            .join("\n");
 
-        return finalRankings.map(rank => `${rank.name}, ${rank.score.toLocaleString('en-US')}`).join('\n');
+        return final || "No scores found.";
 
-    } catch (error) {
-        console.error('Scraping Error:', error);
-        return `Error: ${error.message}`;
+    } catch (err) {
+        console.error("Scrape FAILED:", err);
+        return "Error: " + err.message;
+
     } finally {
         if (browser) await browser.close();
     }
